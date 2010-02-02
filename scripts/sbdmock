@@ -40,6 +40,9 @@ from optparse import OptionParser
 from minideblib.ChangeFile import ChangeFile
 from minideblib.DpkgVersion import DpkgVersion
 
+from scratchbox import scratchbox_factory
+from scratchbox.common import Scratchbox
+
 # Fixed settings, do not change these unless you really know what you are doing
 PackageRegex = "[a-z0-9][a-z0-9.+-]+"        # Regular expression package names must comply with
 VersionRegex = "(?:[0-9]+:)?[a-zA-Z0-9.+-]+" # Regular expression package versions must comply wi
@@ -95,35 +98,29 @@ class SBError(Error):
 
 class SBBuilder:
     """base Scratcbox builder object"""
-    def __init__(self, config):
+    def __init__(self, config, scratchbox):
         self._state = 'unstarted'
         self.tmplog = []
         self.config = config
-        
+        self.sb = scratchbox
+
         # SB Target setup
         if self.config['uniqueext']:
             self.sbtarget = "%s-%s" % (config['sbtarget'], config['uniqueext'])
         else:
             self.sbtarget = config['sbtarget']
-        
+
+        # set target name to be able to use get_sb_* methods
+        scratchbox.set_target_name(self.sbtarget)
+
         # paths setup:
         # root = sbdmock target name, e.g. "dist-branch-arch-repo"
         root = config['root']
-        # /scratchbox/users/$USER
-        self.sbbasedir = config['basedir']
-        # path to target: /scratchbox/users/$USER/targets/$TARGET
-        self.sbtargetdir = os.path.join(self.sbbasedir, 'targets', self.sbtarget)
         # directory inside scratchbox where we perform build.
-        # by default = /home/$USER
-        self.sb_homedir = config['sb_homedir']
-        if self.sb_homedir.startswith("/home/"):
-            homedir = self.sbbasedir + self.sb_homedir
-        else:
-            homedir = self.sbtargetdir + self.sb_homedir
-        
+        # by default = /home/$USER in sb1
         # Base directories for build's workspace
-        self.sb_builddir = os.path.join(self.sb_homedir, root)
-        self.builddir = os.path.join(homedir, root)
+        self.sb_builddir = os.path.join(scratchbox.get_sb_homedir(), root)
+        self.builddir = os.path.join(scratchbox.get_homedir(), root)
         
         # Directory where build is done
         self.sb_workdir = os.path.join(self.sb_builddir, "work")
@@ -133,11 +130,18 @@ class SBBuilder:
         self.resultdir = self.config.get('resultdir', os.path.join(self.builddir, 'result'))
         self.statedir = self.config.get('statedir', os.path.join(self.builddir, 'state'))
         
-        self._ensure_dir(self.statedir)
-        self.state("init")
-        
         if config['clean']:
             self.clean()
+        
+        if self.config['uniqueext']:
+            # temporary target.
+            # Let's ensure to remove old one:
+            self.sb.remove(self.sbtarget)
+            # we need to create it
+            self.sb.create_target(self.sbtarget, config)    
+        
+        self._ensure_dir(self.statedir)
+        self.state("init")
         
         self._ensure_dir(self.builddir)
         self._ensure_dir(self.workdir)
@@ -221,17 +225,19 @@ class SBBuilder:
     
     def clean(self):
         """clean out chroot with extreme prejudice :)"""
-        self.state("clean")
+        # DR: in SB2 there is no directory yet to write state/status file into
+        #self.state("clean")
         
-        self.root_log('Cleaning Root')
+        # DR: in SB2 there is no directory yet to write root.log into
+        #self.root_log('Cleaning Root')
         
         if self.config['uniqueext']:
             # temporary target. Let's remove it
-            self._sb_remove_target()
+            self.sb.remove(self.sbtarget)
         else:
             # Normal target. let's just reset it
             # KAD: do we need to install etc and devkits here ?
-            self._sb_reset_target()
+            self.sb.reset(self.sbtarget)
         self._sb_clean_host_usr()
         
         # cleanup workdir
@@ -263,7 +269,9 @@ class SBBuilder:
         """prepare root"""
         self.state("prep")
         
-        self._prep_install()
+        # If "clean" set, we already have clean target
+        if not self.config['clean'] or self.config['uniqueext']:
+            self.sb.reset(self.sbtarget)
 
         # files to install into target. 
         # always copy correct /etc, devkits and fakeroot library
@@ -276,7 +284,7 @@ class SBBuilder:
             # Copy Toolchain C library only, if we don't have rootstrap
             sb_files.append("clibrary")
         # Install files into target
-        self._sb_install_sb_files(sb_files)
+        self.sb.install_files(sb_files)
 
         # After each rootstrap extraction, we need to replace special files in target
         self._sb_extract_special_files()
@@ -285,14 +293,14 @@ class SBBuilder:
     
     def apt(self, cmd):
         """executes apt-get inside target"""
-        basecmd = "fakeroot apt-get -y -q "
+        basecmd = "%s apt-get -y -q " % self.sb.get_superuser_cmd()
         if self.config['apt-get_options']:
             basecmd += self.config['apt-get_options']
         command = '%s %s </dev/null' % (basecmd, cmd)
         self.debug("apt: command %s" % command)
         
         self.root_log(command)
-        (retval, output) = self.do_chroot_ng(command)
+        (retval, output) = self.do_chroot_ng(command, scratchbox_mode=Scratchbox.MODE_EMUL)
         #self.root_log(output)
         
         if retval != 0:
@@ -350,7 +358,7 @@ class SBBuilder:
                 self.build_log('%s="%s"' % (variable, value))
         
         #self.root_log(cmd)
-        (retval, output) = self.do_chroot_ng(cmd)
+        (retval, output) = self.do_chroot_ng(cmd, scratchbox_mode=Scratchbox.MODE_DEVEL)
         
         #self.build_log(output)
         
@@ -503,14 +511,14 @@ class SBBuilder:
         self.root_log("Cleaning up...")
         self.state("ending")
         self._build_log.close()
-        self._sb_killall()
-        if self.config['uniqueext-auto']:
-            self.root_log("Removing temporary target...")
-            self._sb_remove_target()
+        self.sb.killall()
+        self.sb.release()
         self.state("done")
         self.root_log("Done.")
         self._root_log.close()
-    
+        if self.config['uniqueext-auto']:
+            self.debug("Removing temporary target...")
+            self.sb.remove(self.sbtarget)
     
     def _ensure_dir(self, path):
         """check for dir existence and/or makedir, if error out then raise Error"""
@@ -524,48 +532,6 @@ class SBBuilder:
                 os.makedirs(path)
             except OSError, err:
                 raise Error, "Could not create dir %s. Error: %s" % (path, err)
-    
-    def _sb_reset_target(self):
-        """cleanup target and put required libraries in place"""
-        self._ensure_dir(self.builddir)
-        # Cleanup all other processes before reseting
-        self._sb_killall(15)
-        # insure active target
-        self.do_chroot("sb-conf se %s" % self.sbtarget)
-        if not self._sb_ensure_target(self.sbtarget):
-            raise SBError, "Failed to select target %s, exiting" % self.sbtarget
-        
-        self.do_chroot("sb-conf re -f")
-    
-    def _sb_install_sb_files(self, sb_files = ("etc", "devkits")):
-        """Installs into target Scratchbox files (etc, devkits, fakeroot, clibrary)"""
-        if sb_files and isinstance(sb_files, (types.TupleType,types.ListType) ):
-            cmd_args = "sb-conf in --" + " --".join(sb_files)
-            self.do_chroot(cmd_args)
-        
-    
-    def _sb_killall(self, sig = 1):
-        """Kills all processes in other scratchbox sessions. SIGHUP should be enough by default"""
-        self.do_chroot("sb-conf killall --signal=%d" % sig)
-    
-    
-    def _sb_remove_target(self):
-        """Removes target completelly"""
-        self.do_chroot("sb-conf remove --force %s" % self.sbtarget)
-    
-    
-    def _sb_create_target(self):
-        """Creates target from specification"""
-        if not self.config['compiler-name']:
-            raise SBError, "No compilers specified for target %s, exiting" % self.sbtarget
-        if not self.config['devkits']:
-            raise SBError, "No devkits specified for target %s, exiting" % self.sbtarget
-        
-        cmdline = "sb-conf setup %s -f -c %s -d %s" % (self.sbtarget, self.config['compiler-name'], self.config['devkits'])
-        if self.config['cputransparency-method']:
-            cmdline += " -t %s" % self.config['cputransparency-method']
-        self.do_chroot(cmdline)
-    
     
     def _sb_make_cmdfile(self, command, fdn):
         """make cmd file for execution inside scratchbox"""
@@ -608,28 +574,13 @@ class SBBuilder:
         return (retval, output)
     
     
-    def _sb_ensure_target(self, entarget):
-        """checks current active target"""
-        #self.debug("_sb_ensure_target %s" % entarget)
-        (retval, output) = self.do_chroot('echo "SBOX_TARGET_NAME=$SBOX_TARGET_NAME"')
-        self.debug("Return code: %d" % retval)
-        match = re.search("\n*SBOX_TARGET_NAME=(.+)\n*", output, re.M)
-        if not match:
-            self.debug("Can't find target in output: %s" % output)
-            return False
-        #self.debug("SB Target %s" % m.group(1))
-        if match.group(1) != entarget:
-            return False
-        else:
-            return True
-    
-    
     def _sb_extract_rootstrap(self):
         """get (if not local) rootstrap, and extract to target"""
         rootstrap = self.config['rootstrap']
         
         if rootstrap.find('http://') == 0:
-            self.debug("_sb_extract_rootstrap: remote rootstrap. needs to be fetched")
+            self.debug("_sb_extract_rootstrap: remote rootstrap. "
+                       "needs to be fetched to %s" % self.builddir)
             opener = urllib.URLopener()
             try:
                 #self.debug(os.path.join(self.builddir,"rootstrap.tgz"))
@@ -643,13 +594,7 @@ class SBBuilder:
         
         self.root_log("Extracting rootstrap %s" % rootstrap)
         # Local sbox file, just run it
-        (status, output) = self.do_chroot("sb-conf rs %s" % rootstrap)
-        if output.find("_SBOX_RESTART_FILE") >= 0:
-            # Workarround
-            status = 0
-        if status != 0:
-            self.debug("Error output: "+output)
-            raise SBError, "Failed to extract rootstrap, exiting"
+        output = self.sb.extract_rootstrap(rootstrap)
         self.root_log(output)
     
     
@@ -657,9 +602,9 @@ class SBBuilder:
         """execute given command via scratchbox"""
         
         self.debug("Executing(scratchbox) %s" % command)
-        (sbtmpfd, sbtmpname) = tempfile.mkstemp('.sh', 'sbdmock-', os.path.join(self.sbbasedir, "tmp"))
-        sb_tmpname = sbtmpname[len(self.sbbasedir):]
-        #self.debug("tmpfile %s %s" % (sbtmpname,sb_tmpname))
+        (sbtmpfd, sbtmpname) = tempfile.mkstemp('.sh', 'sbdmock-', self.sb.get_tmpdir())
+        sb_tmpname = os.path.join(self.sb.get_sb_tmpdir(), os.path.basename(sbtmpname))
+        self.debug("tmpfile %s %s" % (sbtmpname,sb_tmpname))
         
         self._sb_make_cmdfile(command, sbtmpfd)
         os.close(sbtmpfd)
@@ -668,8 +613,15 @@ class SBBuilder:
         # Check host_usr hack
         self._sb_setup_host_usr_symlink()
         
-        (status, output) = commands.getstatusoutput( "%s %s" % (self.config['scratchbox'], sb_tmpname))
+        # TODO: SB2 HACK!!! commands need to be executed from target dir
+        savedir = os.getcwd() 
+        self.debug("Directory temporarily changed to: %s" % self.sb.get_targetdir(self.sbtarget))
+        (status, output) = commands.getstatusoutput( "%s %s %s" % \
+                                                    (self.sb.exe, 
+                                                     self.sb.get_mode_options(Scratchbox.MODE_EMUL),
+                                                     sb_tmpname))
         self.debug("Return status: %d" % status)
+        os.chdir(savedir)
         
         (retval, output) = self._sb_parse_output(output)
         os.unlink(sbtmpname)
@@ -677,13 +629,13 @@ class SBBuilder:
         return (retval, output)
     
     
-    def do_sbox_ng(self, command):
+    def do_sbox_ng(self, command, scratchbox_mode=Scratchbox.MODE_DEVEL):
         """ The same as do_sbox, but make logs tail-able"""
         
         self.debug("Executing(scratchbox) %s" % command)
-        (sbtmpfd, sbtmpname) = tempfile.mkstemp('.sh', 'sbdmock-', os.path.join(self.sbbasedir, "tmp"))
-        sb_tmpname = sbtmpname[len(self.sbbasedir):]
-        #self.debug("tmpfile %s %s" % (sbtmpname,sb_tmpname))
+        (sbtmpfd, sbtmpname) = tempfile.mkstemp('.sh', 'sbdmock-', self.sb.get_tmpdir())
+        sb_tmpname = os.path.join(self.sb.get_sb_tmpdir(), os.path.basename(sbtmpname))
+        self.debug("tmpfile %s %s" % (sbtmpname,sb_tmpname))
         
         self._sb_make_cmdfile(command, sbtmpfd)
         os.close(sbtmpfd)
@@ -691,8 +643,18 @@ class SBBuilder:
         
         # Check host_usr hack
         self._sb_setup_host_usr_symlink()
-        
-        pipe = popen2.Popen4("%s %s </dev/null" % (self.config['scratchbox'], sb_tmpname))
+
+        self.debug("Current dir: %s" % os.getcwd())
+        # TODO: SB2 HACK!!! commands need to be executed from target dir
+        savedir = os.getcwd() 
+        self.debug("Directory temporarily changed to: %s" % self.sb.get_targetdir(self.sbtarget))
+        cmd = "%s %s %s </dev/null" % \
+                             (self.sb.exe,
+                              self.sb.get_mode_options(scratchbox_mode),
+                              sb_tmpname)
+        self.debug("Executing in pipe: %s" % cmd)
+        pipe = popen2.Popen4(cmd)
+        os.chdir(savedir)
         # We will only read from pipe
         pipe.tochild.close()
         
@@ -763,10 +725,11 @@ class SBBuilder:
         return (ret, output)
     
     
-    def do_chroot_ng(self, command, fatal = False, exitcode=None):
+    def do_chroot_ng(self, command, fatal = False, exitcode=None,
+                     scratchbox_mode=Scratchbox.MODE_DEVEL):
         """execute given command in sbox target but make logs tail-able"""
         
-        (ret, output) = self.do_sbox_ng(command)
+        (ret, output) = self.do_sbox_ng(command, scratchbox_mode=scratchbox_mode)
         if (ret != 0) and fatal:
             self.close()
             if exitcode:
@@ -777,26 +740,9 @@ class SBBuilder:
         
         return (ret, output)
     
-    
-    def _prep_install(self):
-        """prep sb target for installation"""
-        # switch to target
-        # reset target
-        
-        if self.config['uniqueext']:
-            # temporary target.
-            # Let's ensure to remove old one:
-            self._sb_remove_target()
-            # we need to create it
-            self._sb_create_target()
-        
-        # If "clean" set, we already have clean target
-        if not self.config['clean'] or self.config['uniqueext']:
-            self._sb_reset_target()
-    
     def _sb_extract_special_files(self):
         # write in sources.list into chroot
-        aptsconf = os.path.join(self.sbtargetdir, 'etc', 'apt','sources.list')
+        aptsconf = os.path.join(self.sb.get_targetdir(), 'etc', 'apt','sources.list')
         self.debug("Extracting sources.list (%s)" % aptsconf)
         aptsconf_fo = open(aptsconf, 'w')
         aptsconf_content = self.config['sources.list']
@@ -805,7 +751,7 @@ class SBBuilder:
         # files in /etc that need doing
         filedict = self.config['files']
         for key in filedict:
-            fnm = '%s%s' % (self.sbtargetdir, key)
+            fnm = '%s%s' % (self.sb.get_targetdir(), key)
             self.debug("Extracting file %s" % fnm)
             fon = open(fnm, 'w')
             fon.write(filedict[key])
@@ -819,7 +765,7 @@ class SBBuilder:
     def _sb_setup_host_usr_symlink(self):
         """Remove /host_usr/bin. If we have our own"""
         # No need to make /host_usr/bin if no hacks in it
-        dname_c = os.path.join(self.sbbasedir, 'host_usr/bin')
+        dname_c = os.path.join(self.sb.get_basedir(), 'host_usr/bin')
         dname_t = 'bin.' + self.sbtarget
         if os.path.islink(dname_c):
             if os.readlink(dname_c) == dname_t:
@@ -840,7 +786,7 @@ class SBBuilder:
     
     def _sb_setup_host_usr(self):
         if self.config['host_usr']:
-            dname = os.path.join(self.sbbasedir, 'host_usr/bin') + '.' + self.sbtarget
+            dname = os.path.join(self.sb.get_basedir(), 'host_usr/bin') + '.' + self.sbtarget
             # assume that we don't have such directory.
             self._ensure_dir(dname)
             
@@ -856,10 +802,10 @@ class SBBuilder:
     
     
     def _sb_clean_host_usr(self):
-        dname = os.path.join(self.sbbasedir, 'host_usr/bin') + '.' + self.sbtarget
+        dname = os.path.join(self.sb.get_basedir(), 'host_usr/bin') + '.' + self.sbtarget
         if os.path.exists(dname):
             shutil.rmtree(dname, True)
-        dname = os.path.join(self.sbbasedir, 'host_usr/bin')
+        dname = os.path.join(self.sb.get_basedir(), 'host_usr/bin')
         if os.path.islink(dname) and os.readlink(dname) == "bin." + self.sbtarget:
             os.unlink(dname)
 
@@ -899,6 +845,9 @@ def command_parse():
         clean - clean out the specified chroot
         init - initialize the chroot, do not build anything"""
     parser = OptionParser(usage=usage)
+    parser.add_option("--sbver", action="store", type="int", dest="sbver",
+                      default=0,
+                      help="Scratchbox version to use. By default the version %default is used.")
     parser.add_option("-r", action="store", type="string", dest="target",
                       default='default',
                       help="compilation target name/config file name default: %default")
@@ -941,15 +890,6 @@ def main():
         error("Don't try to run this programm as root!")
         sys.exit(1)
     
-    try:
-        gid = grp.getgrnam('sbox')[2]
-    except KeyError:
-        gid = None
-    
-    if gid is None or gid not in os.getgroups():
-        print "You need to be a member of the sbox group for use scratchbox"
-        sys.exit(1)
-    
     # config path
     config_path = '/etc/sbdmock'
     config_path_user = os.path.join(os.environ['HOME'], '.sbdmock')
@@ -958,15 +898,12 @@ def main():
     config_opts = {
         'clean': True,
         'debug': False,
-        'basedir': os.path.join('/scratchbox/users', os.environ['USER']),
-        'sb_homedir': os.path.join('/home', os.environ['USER']),
         'files': {},
         'host_usr': {},
         'env': { 'DEBIAN_FRONTEND': 'noninteractive', 'DEBIAN_PRIORITY': 'critical' },
         'rm': 'rm',
         'dpkg-buildpackage': 'dpkg-buildpackage -rfakeroot -uc -us -sa -D',
         'apt-get_options': '',
-        'scratchbox': '/scratchbox/login',
         'sources.list': '',
         'uniqueext': '',
         'uniqueext-auto': False,
@@ -981,6 +918,11 @@ def main():
 
     # cli option parsing
     (options, args) = command_parse()
+    
+    try:
+        gid = grp.getgrnam('sbox')[2]
+    except KeyError:
+        gid = None
     
     if len(args) < 1:
         error("No dsc or command specified - nothing to do")
@@ -1004,6 +946,16 @@ def main():
     if os.path.exists(ucfg):
         execfile(ucfg)
         configured = True
+    
+    if 'sbver' not in config_opts:
+        config_opts['sbver'] = 1
+
+    if options.sbver > 0:
+        config_opts['sbver'] = options.sbver
+
+    if config_opts['sbver'] == 1 and (gid is None or gid not in os.getgroups()):
+        print "You need to be a member of the sbox group for use scratchbox"
+        sys.exit(1)
     
     # Are we ready ?
     if not configured:
@@ -1067,6 +1019,17 @@ def main():
                 # Don't override arrays with user defied strings
                 config_opts[var] = value
 
+    scratchbox = scratchbox_factory(config_opts['sbver'])
+
+    # TODO: shouldn't it be a part of Scratchbox.setup() method?
+    # Create sb_basedir/host_usr/bin directory if it doesn't exist
+    hostusrdir = os.path.join(scratchbox.get_basedir(), 'host_usr/bin')
+    if not os.path.exists(hostusrdir):
+        try:
+            os.makedirs(hostusrdir)
+        except OSError:
+            pass
+
     # Update variables, using defines
     for var in config_opts:
         if isinstance(config_opts[var], types.StringType):
@@ -1087,7 +1050,7 @@ def main():
         # unset a --no-clean
         config_opts['clean'] = True
         try:
-            my = SBBuilder(config_opts)
+            my = SBBuilder(config_opts, scratchbox)
         except Error, err:
             error("Error occured: %s" % err.msg)
             if my:
@@ -1099,7 +1062,7 @@ def main():
     
     elif args[0] == 'init':
         try:
-            my = SBBuilder(config_opts)
+            my = SBBuilder(config_opts, scratchbox)
             my.prep()
         except Error, err:
             error("Error occured: %s" % err.msg)
@@ -1136,7 +1099,7 @@ def main():
         
         start_time = time.time()
         try:
-            my = SBBuilder(config_opts)
+            my = SBBuilder(config_opts, scratchbox)
             my.prep()
             my.build(dsc)
         except Error, err:

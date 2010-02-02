@@ -1,3 +1,29 @@
+sbdmock (0.4.7) unstable; urgency=low
+
+  * Removed os.chdir(self.sb.get_targetdir(self.sbtarget)) from sb2
+    hacks snippets
+
+ -- Ugandhar Reddy <ugandhar.reddy@nokia.com>  Tue, 26 Jan 2010 16:46:11 +0200
+
+sbdmock (0.4.6) unstable; urgency=low
+
+  * sb2 selecting target in SBBuilder.__init__
+  * used refactored scratchbox API
+
+ -- Ed Bartosh <eduard.bartosh@nokia.com>  Mon, 14 Dec 2009 14:58:25 +0200
+
+sbdmock (0.4.5) unstable; urgency=low
+
+  * Release resources aquired by scratchbox when build is finished.
+
+ -- Dmitry Rozhkov <dmitry.rozhkov@nokia.com>  Fri, 04 Dec 2009 17:03:30 +0200
+
+sbdmock (0.4.4) unstable; urgency=low
+
+  * Compatibility to Scratchbox2 added.
+
+ -- Dmitry Rozhkov <dmitry.rozhkov@nokia.com>  Mon, 30 Nov 2009 15:22:02 +0200
+
 sbdmock (0.4.3) unstable; urgency=low
 
   * Fixed issue while removing work directories after very bad packages
