@@ -613,16 +613,12 @@ class SBBuilder:
         # Check host_usr hack
         self._sb_setup_host_usr_symlink()
         
-        # TODO: SB2 HACK!!! commands need to be executed from target dir
-        savedir = os.getcwd() 
-        os.chdir(self.sb.get_targetdir(self.sbtarget))
         self.debug("Directory temporarily changed to: %s" % self.sb.get_targetdir(self.sbtarget))
         (status, output) = commands.getstatusoutput( "%s %s %s" % \
                                                     (self.sb.exe, 
                                                      self.sb.get_mode_options(Scratchbox.MODE_EMUL),
                                                      sb_tmpname))
         self.debug("Return status: %d" % status)
-        os.chdir(savedir)
         
         (retval, output) = self._sb_parse_output(output)
         os.unlink(sbtmpname)
@@ -645,18 +641,12 @@ class SBBuilder:
         # Check host_usr hack
         self._sb_setup_host_usr_symlink()
 
-        self.debug("Current dir: %s" % os.getcwd())
-        # TODO: SB2 HACK!!! commands need to be executed from target dir
-        savedir = os.getcwd() 
-        os.chdir(self.sb.get_targetdir(self.sbtarget))
-        self.debug("Directory temporarily changed to: %s" % self.sb.get_targetdir(self.sbtarget))
         cmd = "%s %s %s </dev/null" % \
                              (self.sb.exe,
                               self.sb.get_mode_options(scratchbox_mode),
                               sb_tmpname)
         self.debug("Executing in pipe: %s" % cmd)
         pipe = popen2.Popen4(cmd)
-        os.chdir(savedir)
         # We will only read from pipe
         pipe.tochild.close()
         

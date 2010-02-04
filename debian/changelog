@@ -1,3 +1,16 @@
+sbdmock (0.4.8) unstable; urgency=low
+
+  * removed SB2 hacks properly
+
+ -- Ed Bartosh <eduard.bartosh@nokia.com>  Thu,  4 Feb 2010 11:45:36 +0200
+
+sbdmock (0.4.7) unstable; urgency=low
+
+  * Removed os.chdir(self.sb.get_targetdir(self.sbtarget)) from sb2
+    hacks snippets
+
+ -- Ugandhar Reddy <ugandhar.reddy@nokia.com>  Tue, 26 Jan 2010 16:46:11 +0200
+
 sbdmock (0.4.6) unstable; urgency=low
 
   * sb2 selecting target in SBBuilder.__init__
