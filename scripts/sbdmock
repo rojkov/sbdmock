@@ -267,8 +267,9 @@ class SBBuilder:
 
     def prep(self):
         """prepare root"""
+
         self.state("prep")
-        
+
         # If "clean" set, we already have clean target
         if not self.config['clean'] or self.config['uniqueext']:
             self.sb.reset(self.sbtarget)
@@ -289,19 +290,7 @@ class SBBuilder:
         # After each rootstrap extraction, we need to replace special files in target
         self._sb_extract_special_files()
 
-        # Workaround for race condition with repository update
-        tries = 3
-        delay = 20
-        while tries:
-            tries -= 1
-            try:
-                retval, output = self.apt("update")
-                break
-            except AptError, excobj:
-                if tries:
-                    time.sleep(delay)
-                else:
-                    raise excobj
+        self.apt("update")
 
     def apt(self, cmd):
         """executes apt-get inside target"""
