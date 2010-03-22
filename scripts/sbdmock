@@ -288,9 +288,21 @@ class SBBuilder:
 
         # After each rootstrap extraction, we need to replace special files in target
         self._sb_extract_special_files()
-        self.apt("update")
-    
-    
+
+        # Workaround for race condition with repository update
+        tries = 3
+        delay = 20
+        while tries:
+            tries -= 1
+            try:
+                retval, output = self.apt("update")
+                break
+            except AptError, excobj:
+                if tries:
+                    time.sleep(delay)
+                else:
+                    raise excobj
+
     def apt(self, cmd):
         """executes apt-get inside target"""
         basecmd = "%s apt-get -y -q " % self.sb.get_superuser_cmd()
@@ -304,7 +316,7 @@ class SBBuilder:
         #self.root_log(output)
         
         if retval != 0:
-            raise AptError, "Error peforming apt-get command: %s" % command
+            raise AptError, "Error peforming apt-get command: %s (rc; %d)" % (command, retval)
         
         return (retval, output)
     

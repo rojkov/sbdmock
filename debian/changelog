@@ -1,3 +1,10 @@
+sbdmock (0.4.9) unstable; urgency=low
+
+  * prep: added workaround for race condition during repository 
+          update
+
+ -- Ed Bartosh <eduard.bartosh@nokia.com>  Mon, 22 Mar 2010 18:08:01 +0200
+
 sbdmock (0.4.8) unstable; urgency=low
 
   * removed SB2 hacks properly
