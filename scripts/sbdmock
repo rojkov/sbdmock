@@ -305,7 +305,7 @@ class SBBuilder:
         #self.root_log(output)
         
         if retval != 0:
-            raise AptError, "Error peforming apt-get command: %s (rc; %d)" % (command, retval)
+            raise AptError, "Error peforming apt-get command: %s (rc: %d)" % (command, retval)
         
         return (retval, output)
     
