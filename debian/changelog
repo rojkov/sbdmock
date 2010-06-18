@@ -1,3 +1,9 @@
+sbdmock (0.4.10+squeeze1) unstable; urgency=low
+
+  * Increased debhelper compatibility level up to 7
+
+ -- Dmitry Rozhkov <dmitry.rozhkov@nokia.com>  Fri, 18 Jun 2010 16:32:09 +0300
+
 sbdmock (0.4.10) unstable; urgency=low
 
   * prep: reverted back changes from r0.4.9
