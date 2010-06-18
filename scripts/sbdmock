@@ -647,7 +647,9 @@ class SBBuilder:
                               self.sb.get_mode_options(scratchbox_mode),
                               sb_tmpname)
         self.debug("Executing in pipe: %s" % cmd)
-        pipe = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
+        pipe = subprocess.Popen(cmd.split(),
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT)
 
         if self.state() == "build":
             logfile = self._build_log
