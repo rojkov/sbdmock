@@ -34,7 +34,7 @@ import tempfile
 import re
 import urllib
 import time
-import popen2
+import subprocess
 from optparse import OptionParser
 
 from minideblib.ChangeFile import ChangeFile
@@ -642,14 +642,12 @@ class SBBuilder:
         # Check host_usr hack
         self._sb_setup_host_usr_symlink()
 
-        cmd = "%s %s %s </dev/null" % \
+        cmd = "%s %s %s" % \
                              (self.sb.exe,
                               self.sb.get_mode_options(scratchbox_mode),
                               sb_tmpname)
         self.debug("Executing in pipe: %s" % cmd)
-        pipe = popen2.Popen4(cmd)
-        # We will only read from pipe
-        pipe.tochild.close()
+        pipe = subprocess.Popen(cmd.split(), stdout=subprocess.PIPE)
 
         if self.state() == "build":
             logfile = self._build_log
@@ -662,7 +660,7 @@ class SBBuilder:
             collect = True
 
         while True:
-            line = pipe.fromchild.readline()
+            line = pipe.stdout.readline()
             if not line:
                 break
             if not collect and line.startswith("SBDMOCK-AUTO: Start"):
@@ -679,7 +677,7 @@ class SBBuilder:
                 self.debug(line, True)
                 output += line
 
-        pipe.fromchild.close()
+        pipe.stdout.close()
         status = pipe.wait()
         self.debug("SB return code: %d" % status)
 
